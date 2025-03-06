@@ -107,7 +107,7 @@ class DirectMHPWrapper:
                 yaw = (det[7] - 0.5) * 360
                 roll = (det[8] - 0.5) * 180
                 predictions.append({'yaw': yaw, 'pitch': pitch, 'roll': roll})
-
+                
                 # (Optional) Overlay bounding box and angles on the frame
                 x1, y1, x2, y2 = det[:4].astype(int)
                 im0_copy = im0.copy()
