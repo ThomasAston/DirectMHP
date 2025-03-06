@@ -1,5 +1,3 @@
-# directmhp.py
-
 import os
 import torch
 import cv2
@@ -13,7 +11,12 @@ from .utils.datasets import LoadImages
 from .utils.plots import plot_3axis_Zaxis
 from .models.experimental import attempt_load
 
+
 class DirectMHPWrapper:
+    """
+    A wrapper for the DirectMHP model that runs inference on a video.
+    This class references the local code in the 'directmhp' folder.
+    """
     def __init__(self,
                  weights_path,
                  data_config='data/agora_coco.yaml',
@@ -34,7 +37,6 @@ class DirectMHPWrapper:
 
         # --- Make the path to data_config dynamic ---
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        # If data_config is not already an absolute path, join it with the current_dir
         if not os.path.isabs(data_config):
             data_config = os.path.join(current_dir, data_config)
         
@@ -50,7 +52,7 @@ class DirectMHPWrapper:
             self.model(dummy)
         self.model.eval()
 
-    def run_on_video(self, video_path, start=0, end=-1, save_video=False):
+    def run_on_video(self, video_path, start=0, end=-1, save_video=False, results_dir=None):
         """
         Run DirectMHP inference on a video file.
 
@@ -58,9 +60,10 @@ class DirectMHPWrapper:
         :param start: Start time in seconds.
         :param end: End time in seconds (-1 for remainder of the video).
         :param save_video: If True, saves an annotated video with bounding boxes and angles.
+        :param results_dir: Optional directory path where the output video should be saved.
         :return: (predictions, fps) where
-                 predictions = list of dicts, each with {'yaw', 'pitch', 'roll'} for each frame
-                 fps = frames per second of the original video
+                 predictions = list of dicts, each with {'yaw', 'pitch', 'roll'} for each frame,
+                 fps = frames per second of the original video.
         """
         dataset = LoadImages(video_path, img_size=self.imgsz, stride=self.stride, auto=True)
         cap = dataset.cap
@@ -77,14 +80,18 @@ class DirectMHPWrapper:
         # Optionally, set up a VideoWriter if we want to save the output
         writer = None
         if save_video:
-            out_path = os.path.splitext(video_path)[0] + "_DirectMHP.mp4"
+            if results_dir is not None:
+                os.makedirs(results_dir, exist_ok=True)
+                base_name = os.path.basename(os.path.splitext(video_path)[0])
+                out_path = os.path.join(results_dir, base_name + "_DirectMHP.mp4")
+            else:
+                out_path = os.path.splitext(video_path)[0] + "_DirectMHP.mp4"
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             writer = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
 
         predictions = []
         dataset = tqdm(dataset, desc='Running DirectMHP inference', total=n)
         for i, (path, img, im0, _) in enumerate(dataset):
-            # Convert numpy image to tensor
             img_tensor = torch.from_numpy(img).to(self.device).float() / 255.0
             if img_tensor.ndimension() == 3:
                 img_tensor = img_tensor.unsqueeze(0)
@@ -95,19 +102,18 @@ class DirectMHPWrapper:
                                       self.iou_thres,
                                       num_angles=self.data_cfg['num_angles'])
             if len(out[0]) == 0:
-                # No detections for this frame
                 predictions.append({'yaw': float('nan'),
                                     'pitch': float('nan'),
                                     'roll': float('nan')})
             else:
-                # For simplicity, use the first detection
                 det = out[0][0].cpu().numpy()
+                pitchs_yaws_rolls = det[6:]
                 # det format: [x1, y1, x2, y2, conf, class, pitch, yaw, roll]
-                pitch = (det[6] - 0.5) * 180
-                yaw = (det[7] - 0.5) * 360
-                roll = (det[8] - 0.5) * 180
+                pitch = (pitchs_yaws_rolls[0] - 0.5) * 180
+                yaw = (pitchs_yaws_rolls[1] - 0.5) * 360
+                roll = (pitchs_yaws_rolls[2] - 0.5) * 180
                 predictions.append({'yaw': yaw, 'pitch': pitch, 'roll': roll})
-                
+                print(f"Frame {i}: Yaw={yaw:.2f}, Pitch={pitch:.2f}, Roll={roll:.2f}")
                 # (Optional) Overlay bounding box and angles on the frame
                 x1, y1, x2, y2 = det[:4].astype(int)
                 im0_copy = im0.copy()
@@ -118,7 +124,6 @@ class DirectMHPWrapper:
                                             tdy=(y1 + y2) / 2,
                                             size=max(y2 - y1, x2 - x1) * 0.8,
                                             thickness=2)
-                # Blend original and annotated frame
                 im0 = cv2.addWeighted(im0, self.alpha, im0_copy, 1 - self.alpha, gamma=0)
 
             if save_video and writer is not None:
