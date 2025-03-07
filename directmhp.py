@@ -21,7 +21,7 @@ class DirectMHPWrapper:
                  weights_path,
                  data_config='data/agora_coco.yaml',
                  imgsz=1280,
-                 conf_thres=0.7,
+                 conf_thres=0.3,
                  iou_thres=0.45,
                  device='',
                  scales=[1],
